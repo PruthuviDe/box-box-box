@@ -135,14 +135,14 @@ def strategy_signatures(race_config: dict, strategy: dict):
     }
 
 
-def prior_score(race_config: dict, strategy: dict):
+def prior_score(race_config: dict, strategy: dict, blend_weights_override=None):
     if PRIORS is None:
         return 10.5
 
     sigs = strategy_signatures(race_config, strategy)
     default_prior = PRIORS.get("default_prior", 10.5)
     prior_tables = PRIORS["priors"]
-    blend_weights = PRIORS["blend_weights"]
+    blend_weights = blend_weights_override if blend_weights_override is not None else PRIORS["blend_weights"]
 
     # Support both v1 (k1-k5) and v2 (k1-k7) prior tables
     all_keys = ("k1", "k2", "k3", "k4", "k5", "k6", "k7")
@@ -360,13 +360,26 @@ def predict_positions(test_case: dict):
     if MODEL is None:
         return heuristic_positions(test_case)
 
+    race_track = test_case["race_config"]["track"]
+    race_temp_bucket = (test_case["race_config"]["track_temp"] // 3) * 3
+    default_blend = PRIORS.get("blend_weights") if PRIORS else None
+    track_overrides = PRIORS.get("track_blend_overrides", {}) if PRIORS else {}
+    track_temp_overrides = PRIORS.get("track_temp_blend_overrides", {}) if PRIORS else {}
+    track_temp_key = f"{race_track}|{race_temp_bucket}"
+    blend_weights = track_temp_overrides.get(track_temp_key, track_overrides.get(race_track, default_blend))
+    grid_tiebreak = PRIORS.get("grid_tiebreak_weight", 0.0) if PRIORS else 0.0
+    group_tie_overrides = PRIORS.get("track_temp_grid_tiebreak_overrides", {}) if PRIORS else {}
+    grid_tiebreak = group_tie_overrides.get(track_temp_key, grid_tiebreak)
+
     scored = []
-    for strategy in test_case["strategies"].values():
+    for position_key, strategy in test_case["strategies"].items():
+        grid_position = int(position_key.replace("pos", ""))
         nn_score = score_strategy(build_features(test_case, strategy))
-        if PRIORS is None:
+        if PRIORS is None or blend_weights is None:
             score = nn_score
         else:
-            score = PRIORS["blend_weights"][0] * nn_score + prior_score(test_case["race_config"], strategy)
+            score = blend_weights[0] * nn_score + prior_score(test_case["race_config"], strategy, blend_weights)
+            score += grid_tiebreak * grid_position
         scored.append((score, strategy["driver_id"]))
 
     scored.sort()
