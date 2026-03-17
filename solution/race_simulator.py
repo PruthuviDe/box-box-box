@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Final submission entry point for Box Box Box race prediction."""
 import json
 import sys
 from pathlib import Path
